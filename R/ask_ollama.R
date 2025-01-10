@@ -106,3 +106,99 @@ ask_ollama <- function(question, model_name = "llama2", base_url = "https://olla
         stop(paste(error_message, "\n", api_content))
 }
 }
+
+#' Interroger le Modèle Llama3.2-Vision via Ollama
+#'
+#' @param question character La question à poser sur l'image
+#' @param image_path character Chemin vers l'image à analyser
+#' @param model_name character Nom du modèle (défaut: "llama3.2-vision")
+#'
+#' @return character La réponse du modèle
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' reponse <- ask_ollama_vision(
+#'   question = "What is in this image?",
+#'   image_path = "image.jpg"
+#' )
+#' }
+ask_ollama_vision <- function(question, image_path = NULL, model_name = "llama3.2-vision", base_url = "https://ollama-clem.lab.sspcloud.fr") {
+  # Vérifier que le fichier existe
+  if (!file.exists(image_path)) {
+    stop("Le fichier image n'existe pas: ", image_path)
+  }
+
+  # Convertir TIFF en JPEG temporaire si nécessaire
+  if (tools::file_ext(image_path) == "tif" || tools::file_ext(image_path) == "tiff") {
+    require(magick)
+    temp_jpg <- tempfile(fileext = ".jpg")
+    image_read(image_path) |> 
+      image_write(temp_jpg, format = "jpg")
+    image_path <- temp_jpg
+  }
+
+  # Lire et encoder l'image
+  tryCatch({
+    image_data <- readBin(image_path, "raw", file.info(image_path)$size)
+    image_base64 <- base64enc::base64encode(image_data)
+  }, error = function(e) {
+    stop("Erreur lors de la lecture/encodage de l'image: ", e$message)
+  })
+
+  # Créer le JSON
+  json_data <- sprintf('{
+    "model": "%s",
+    "messages": [
+      {
+        "role": "user",
+        "content": "%s",
+        "images": ["%s"]
+      }
+    ]
+  }', model_name, question, image_base64)
+  
+  # Sauvegarder le JSON dans un fichier temporaire
+  tmp_file <- tempfile(fileext = ".json")
+  writeLines(json_data, tmp_file)
+
+  # Exécuter curl directement avec les arguments appropriés
+  response <- system2(
+    "curl",
+    args = c(
+      "-X", "POST",
+      "-H", "Content-Type: application/json",
+      "-d", paste0("@", tmp_file),
+      paste0(base_url,"/api/chat")
+    ),
+    stdout = TRUE,
+    stderr = TRUE
+  )
+  
+  # Nettoyer le fichier temporaire
+  unlink(tmp_file)
+  
+  # Parser la réponse et nettoyer le HTML
+  full_text <- ""
+  for(line in response) {
+    if(grepl("content", line)) {
+      # Extraire le contenu
+      content <- gsub('.*"content":"([^"]*)".*', "\\1", line)
+      # Nettoyer les balises HTML et les caractères d'échappement
+      content <- gsub("<[^>]+>", "", content)     # Enlever les balises HTML
+      content <- gsub("\\\\", "", content)        # Enlever les backslashes
+      content <- gsub("^\"|\"$", "", content)     # Enlever les guillemets aux extrémités
+      
+      # Ajouter des espaces entre les mots (majuscules indiquent nouveau mot)
+      content <- gsub("([a-z])([A-Z])", "\\1 \\2", content)
+      content <- trimws(content)                  # Enlever les espaces inutiles
+      
+      full_text <- paste0(full_text, content)
+    }
+  }
+  
+  # Nettoyer les caractères spéciaux restants et normaliser les espaces
+  full_text <- gsub("\\s+", " ", full_text)      # Normaliser les espaces
+  
+  return(full_text)
+}
