@@ -8,27 +8,31 @@ ask_ollama_vision(
   question,
   image_path = NULL,
   model_name = "llama3.2-vision",
-  base_url = "https://ollama-clem.lab.sspcloud.fr"
+  base_url = "https://ollama-clem.lab.sspcloud.fr",
+  api_url = "/api/chat",
+  structure_json =
+    "{\\n    \\"model\\": \\"\%s\\",\\n    \\"messages\\": [\\n      {\\n        \\"role\\": \\"user\\",\\n        \\"content\\": \\"\%s\\",\\n        \\"images\\": [\\"\%s\\"]\\n      }\\n    ]\\n  }",
+  process_response_function = process_ollama_response
 )
 }
 \arguments{
-\item{question}{character La question à poser sur l'image}
+\item{question}{\code{character} : La question ou instruction textuelle à envoyer au modèle.}
 
-\item{image_path}{character Chemin vers l'image à analyser}
+\item{image_path}{\code{character} : Chemin vers l'image à analyser (peut être NULL si pas d'image).}
 
-\item{model_name}{character Nom du modèle (défaut: "llama3.2-vision")}
+\item{model_name}{\code{character} : Nom du modèle, par défaut \code{"llama3.2-vision"}.}
+
+\item{base_url}{\code{character} : URL de base de l'API Ollama, par défaut \code{"https://ollama-clem.lab.sspcloud.fr"}.}
 }
 \value{
-character La réponse du modèle
+\code{character} : La réponse textuelle générée par le modèle.
 }
 \description{
-Interroger le Modèle Llama3.2-Vision via Ollama
+Cette fonction permet d'interroger un modèle multimodal tel que \code{llama3.2-vision}
+via l'API Ollama. En plus de la question textuelle, vous pouvez fournir un chemin
+vers une image à analyser.
 }
-\examples{
-\dontrun{
-reponse <- ask_ollama_vision(
-  question = "What is in this image?",
-  image_path = "image.jpg"
-)
-}
+\details{
+Cette fonction utilise l'endpoint \code{/api/chat} au lieu de \code{/api/generate},
+car les modèles de vision attendent un format « chat » avec \code{images}.
 }

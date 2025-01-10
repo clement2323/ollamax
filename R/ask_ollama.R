@@ -108,6 +108,63 @@ ask_ollama <- function(question, model_name = "llama2", base_url = "https://olla
 }
 
 
+#' Convertir une Image en Base64
+#'
+#' Cette fonction prend un chemin de fichier image et retourne sa représentation en base64.
+#' Elle gère automatiquement la conversion des fichiers TIFF en JPEG si nécessaire.
+#'
+#' @param image_path character Chemin vers le fichier image
+#' @return character Chaîne de caractères contenant l'image encodée en base64
+#'
+#' @details
+#' La fonction effectue les opérations suivantes :
+#' \itemize{
+#'   \item Vérifie l'existence du fichier
+#'   \item Convertit automatiquement les TIFF en JPEG temporaire
+#'   \item Lit le fichier en binaire
+#'   \item Encode le contenu en base64
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' # Encoder une image JPEG
+#' base64_str <- image_to_base64("image.jpg")
+#'
+#' # Encoder une image TIFF (sera convertie en JPEG)
+#' base64_str <- image_to_base64("image.tiff")
+#' }
+#'
+#' @importFrom tools file_ext
+#' @importFrom base64enc base64encode
+#' @importFrom magick image_read image_write
+#'
+#' @export
+image_to_base64 <- function(image_path) {
+  # Vérifier que le fichier existe
+  if (!file.exists(image_path)) {
+    stop("Le fichier image n'existe pas: ", image_path)
+  }
+
+  # Convertir TIFF en JPEG temporaire si nécessaire
+  if (tools::file_ext(image_path) == "tif" || tools::file_ext(image_path) == "tiff") {
+    temp_jpg <- tempfile(fileext = ".jpg")
+    magick::image_read(image_path) |> 
+      magick::image_write(temp_jpg, format = "jpg")
+    image_path <- temp_jpg
+    on.exit(unlink(temp_jpg))  # Nettoyer le fichier temporaire à la sortie
+  }
+
+  # Lire et encoder l'image
+  tryCatch({
+    image_data <- readBin(image_path, "raw", file.info(image_path)$size)
+    img_base64 <- base64enc::base64encode(image_data)
+  }, error = function(e) {
+    stop("Erreur lors de la lecture/encodage de l'image: ", e$message)
+  })
+
+  img_base64
+}
+
 
 #' Interroger le Modèle Llama3.2-Vision via Ollama
 #'
@@ -129,31 +186,13 @@ ask_ollama <- function(question, model_name = "llama2", base_url = "https://olla
 #' @import httr
 #' @import jsonlite
 #' @export
-ask_ollama_vision <- function(question, image_path = NULL, model_name = "llama3.2-vision", base_url = "https://ollama-clem.lab.sspcloud.fr") {
-  # Vérifier que le fichier existe
-  if (!file.exists(image_path)) {
-    stop("Le fichier image n'existe pas: ", image_path)
-  }
-
-  # Convertir TIFF en JPEG temporaire si nécessaire
-  if (tools::file_ext(image_path) == "tif" || tools::file_ext(image_path) == "tiff") {
-    require(magick)
-    temp_jpg <- tempfile(fileext = ".jpg")
-    image_read(image_path) |> 
-      image_write(temp_jpg, format = "jpg")
-    image_path <- temp_jpg
-  }
-
-  # Lire et encoder l'image
-  tryCatch({
-    image_data <- readBin(image_path, "raw", file.info(image_path)$size)
-    image_base64 <- base64enc::base64encode(image_data)
-  }, error = function(e) {
-    stop("Erreur lors de la lecture/encodage de l'image: ", e$message)
-  })
-
-  # Créer le JSON
-  json_data <- sprintf('{
+ask_ollama_vision <- function(
+  question,
+  image_path = NULL,
+  model_name = "llama3.2-vision",
+  base_url = "https://ollama-clem.lab.sspcloud.fr",
+  api_url ="/api/chat",
+  structure_json ='{
     "model": "%s",
     "messages": [
       {
@@ -162,8 +201,15 @@ ask_ollama_vision <- function(question, image_path = NULL, model_name = "llama3.
         "images": ["%s"]
       }
     ]
-  }', model_name, question, image_base64)
+  }',
+  process_response_function = process_ollama_response
+  ){
+  cat("Image path:", image_path, "\n")
+  cat("Question:", question, "\n")
   
+  image_base64 <- image_to_base64(image_path)
+  # Créer le JSON
+  json_data <- sprintf(structure_json, model_name, question, image_base64)
   # Sauvegarder le JSON dans un fichier temporaire
   tmp_file <- tempfile(fileext = ".json")
   writeLines(json_data, tmp_file)
@@ -175,7 +221,7 @@ ask_ollama_vision <- function(question, image_path = NULL, model_name = "llama3.
       "-X", "POST",
       "-H", "Content-Type: application/json",
       "-d", paste0("@", tmp_file),
-      paste0(base_url,"/api/chat")
+      paste0(base_url,api_url)
     ),
     stdout = TRUE,
     stderr = TRUE
@@ -183,28 +229,71 @@ ask_ollama_vision <- function(question, image_path = NULL, model_name = "llama3.
   
   # Nettoyer le fichier temporaire
   unlink(tmp_file)
-  
-  # Parser la réponse et nettoyer le HTML
+  return(process_response_function(response))
+}
+
+
+#' Traiter la réponse de l'API LLaVA
+#'
+#' @param response character Vector contenant les lignes de réponse JSON de LLaVA
+#' @return character Le texte assemblé de la réponse
+#' @keywords internal
+process_llava_response <- function(response) {
+  # Initialiser la chaîne de réponse
   full_text <- ""
+  
+  # Parcourir chaque ligne de la réponse
   for(line in response) {
-    if(grepl("content", line)) {
-      # Extraire le contenu
-      content <- gsub('.*"content":"([^"]*)".*', "\\1", line)
-      # Nettoyer les balises HTML et les caractères d'échappement
-      content <- gsub("<[^>]+>", "", content)     # Enlever les balises HTML
-      content <- gsub("\\\\", "", content)        # Enlever les backslashes
-      content <- gsub("^\"|\"$", "", content)     # Enlever les guillemets aux extrémités
-      
-      # Ajouter des espaces entre les mots (majuscules indiquent nouveau mot)
-      content <- gsub("([a-z])([A-Z])", "\\1 \\2", content)
-      content <- trimws(content)                  # Enlever les espaces inutiles
-      
-      full_text <- paste0(full_text, content)
+    # Ne traiter que les lignes JSON valides
+    if(grepl('"response":', line)) {
+      tryCatch({
+        # Parser le JSON
+        json_data <- jsonlite::fromJSON(line)
+        # Extraire le texte de la réponse
+        if(!is.null(json_data$response)) {
+          full_text <- paste0(full_text, json_data$response)
+        }
+      }, error = function(e) {
+        # Ignorer les erreurs de parsing
+      })
     }
   }
   
-  # Nettoyer les caractères spéciaux restants et normaliser les espaces
-  full_text <- gsub("\\s+", " ", full_text)      # Normaliser les espaces
+  # Nettoyer le texte final
+  full_text <- trimws(full_text)
+  full_text <- gsub("\\s+", " ", full_text)  # Normaliser les espaces
+  full_text <- gsub("^\\s*it\\s+contains\\s+", "", full_text)  # Enlever le préfixe commun
   
   return(full_text)
 }
+
+
+# Fonction pour traiter la réponse de l'API
+process_ollama_response <- function(response) {
+  # Initialiser la chaîne de réponse
+  full_text <- ""
+  
+  # Parcourir chaque ligne de la réponse
+  for(line in response) {
+    # Ne traiter que les lignes JSON contenant un message
+    if(grepl('"message":', line)) {
+      # Parser le JSON
+      tryCatch({
+        json_data <- jsonlite::fromJSON(line)
+        # Extraire le contenu si présent
+        if(!is.null(json_data$message$content)) {
+          full_text <- paste0(full_text, json_data$message$content)
+        }
+      }, error = function(e) {
+        # Ignorer les erreurs de parsing
+      })
+    }
+  }
+  
+  # Nettoyer le texte final
+  full_text <- trimws(full_text)
+  full_text <- gsub("\\s+", " ", full_text)
+  
+  return(full_text)
+}
+
