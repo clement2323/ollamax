@@ -107,22 +107,28 @@ ask_ollama <- function(question, model_name = "llama2", base_url = "https://olla
 }
 }
 
+
+
 #' Interroger le Modèle Llama3.2-Vision via Ollama
 #'
-#' @param question character La question à poser sur l'image
-#' @param image_path character Chemin vers l'image à analyser
-#' @param model_name character Nom du modèle (défaut: "llama3.2-vision")
+#' Cette fonction permet d'interroger un modèle multimodal tel que \code{llama3.2-vision}
+#' via l'API Ollama. En plus de la question textuelle, vous pouvez fournir un chemin
+#' vers une image à analyser.
 #'
-#' @return character La réponse du modèle
+#' @param question \code{character} : La question ou instruction textuelle à envoyer au modèle.
+#' @param image_path \code{character} : Chemin vers l'image à analyser (peut être NULL si pas d'image).
+#' @param model_name \code{character} : Nom du modèle, par défaut \code{"llama3.2-vision"}.
+#' @param base_url \code{character} : URL de base de l'API Ollama, par défaut \code{"https://ollama-clem.lab.sspcloud.fr"}.
+#'
+#' @return \code{character} : La réponse textuelle générée par le modèle.
+#'
+#' @details
+#' Cette fonction utilise l'endpoint \code{/api/chat} au lieu de \code{/api/generate},
+#' car les modèles de vision attendent un format « chat » avec \code{images}.
+#'
+#' @import httr
+#' @import jsonlite
 #' @export
-#'
-#' @examples
-#' \dontrun{
-#' reponse <- ask_ollama_vision(
-#'   question = "What is in this image?",
-#'   image_path = "image.jpg"
-#' )
-#' }
 ask_ollama_vision <- function(question, image_path = NULL, model_name = "llama3.2-vision", base_url = "https://ollama-clem.lab.sspcloud.fr") {
   # Vérifier que le fichier existe
   if (!file.exists(image_path)) {
