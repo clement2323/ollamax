@@ -1,4 +1,4 @@
- ollamax - R Package for Ollama Integration
+# ollamax - R Package for Ollama Integration
 
 An R package providing a streamlined interface to interact with Ollama's Large Language Models (LLMs) directly from R.
 
